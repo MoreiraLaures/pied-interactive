@@ -3,10 +3,10 @@ import { Address, Contact } from './shared.types';
 
 
 export type Company = {
-    address: Address; 
+    address: Address;
     companyName: string;
     fantasyName: string;
     cpf: string | null;
-    cnpj: string;
+    cnpj: string | null;
     mainContact: Contact;
 }

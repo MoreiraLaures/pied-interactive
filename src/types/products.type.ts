@@ -27,3 +27,12 @@ export type Product = {
     center: ProductCenter;
     dimensions: ProductDimensions;
 }
+
+export type OrderStructure = {
+    kind: string;
+    arrangements: {
+        linesAmount: number;
+        modulesByLine: number;
+        orientation: string;
+    }[];
+}

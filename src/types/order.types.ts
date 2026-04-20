@@ -8,13 +8,18 @@ import { Address } from './shared.types';
 
 export type Invoice = {
     razaoSocial: string;
+    nomeFantasia?: string;
     temInscricaoEstadual: string;
     temInscricaoSuframa: string;
-    cpf: string;
+    cpf?: string;
+    cnpj?: string;
+    ie?: string;
     rg?: string;
     telephone: string;
     email: string;
     originalInvoiceValue: number;
+    requestedInvoiceValue?: number;
+    serviceToAddInvoiceValue?: number;
     address: Address;
 }
 
@@ -70,5 +75,8 @@ export type Order = {
 
 export type OrderApiResponse = {
     error: string | null;
-    data: { items: Order[] };
+    data: { 
+        items: Order[];
+        totalItems: number;
+    };
 }
