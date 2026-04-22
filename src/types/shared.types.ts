@@ -8,6 +8,7 @@ export type Address = {
     complement?: string;
     patioType?: string;
     patioFormatted?: string;
+    codcid?: number;        
 }
 
 export type Contact = {
@@ -16,3 +17,9 @@ export type Contact = {
     cellphone: string;
     email: string;
 }
+
+export type SankhyaVendedor = {
+    codvend: number;
+    apelido: string;
+    ativo: string;
+};

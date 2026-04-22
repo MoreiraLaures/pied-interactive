@@ -3,6 +3,7 @@ import { WebhookEvent } from '../types/webhook.type';
 import { piedClient } from '../class/pied.class';
 import { Order } from '../types/order.types';
 import { ingestOrder } from '../services/order.ingestor';
+import { processOrder } from '../services/order.processor';
 
 const router = Router()
 
@@ -25,6 +26,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
     for (const order of orders) {
         const result = await ingestOrder(order);
         ingestResults.push(result);
+        await processOrder(order);   // só dispara Sankhya se trigger bater
     }
 
     console.log('Pedido recebido:', code, 'ingested:', ingestResults);

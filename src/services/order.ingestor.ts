@@ -26,6 +26,7 @@ export async function ingestOrder(order: Order): Promise<IngestResult> {
             city:         order.company?.address?.city ?? null,
             state:        order.company?.address?.state ?? null,
             cep:          order.company?.address?.CEP ?? null,
+            codcid:       order.company?.address?.codcid ?? null,        // novo
             contactName:  order.company?.mainContact
                             ? `${order.company.mainContact.name ?? ''} ${order.company.mainContact.surname ?? ''}`.trim() || null
                             : null,
@@ -45,6 +46,7 @@ export async function ingestOrder(order: Order): Promise<IngestResult> {
                       city:         order.invoice?.address?.city ?? null,
                       state:        order.invoice?.address?.state ?? null,
                       cep:          order.invoice?.address?.CEP ?? null,
+                      codcid:       order.invoice?.address?.codcid ?? null,    // novo
                       contactName:  null,
                       contactEmail: order.invoice?.email ?? null,
                       contactPhone: order.invoice?.telephone ?? null,

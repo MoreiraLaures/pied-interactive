@@ -9,6 +9,7 @@ export type PiedPartnerInput = {
     city: string | null;
     state: string | null;
     cep: string | null;
+    codcid: number | null;
     contactName: string | null;
     contactEmail: string | null;
     contactPhone: string | null;
@@ -24,8 +25,9 @@ export async function upsertPiedPartner(
     await client.query(
         `INSERT INTO pied_partners (
             cgc_cpf, cnpj, cpf, company_name, fantasy_name,
-            city, state, cep, contact_name, contact_email, contact_phone, synced_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+            city, state, cep, codcid,
+            contact_name, contact_email, contact_phone, synced_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
          ON CONFLICT (cgc_cpf) DO UPDATE SET
             cnpj          = EXCLUDED.cnpj,
             cpf           = EXCLUDED.cpf,
@@ -34,6 +36,7 @@ export async function upsertPiedPartner(
             city          = EXCLUDED.city,
             state         = EXCLUDED.state,
             cep           = EXCLUDED.cep,
+            codcid        = COALESCE(EXCLUDED.codcid, pied_partners.codcid),
             contact_name  = EXCLUDED.contact_name,
             contact_email = EXCLUDED.contact_email,
             contact_phone = EXCLUDED.contact_phone,
@@ -47,6 +50,7 @@ export async function upsertPiedPartner(
             input.city,
             input.state,
             input.cep,
+            input.codcid,
             input.contactName,
             input.contactEmail,
             input.contactPhone,

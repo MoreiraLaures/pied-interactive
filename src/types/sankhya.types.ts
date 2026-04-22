@@ -1,20 +1,25 @@
 export type SankhyaPartnerInput = {
+  // obrigatorio
   NOMEPARC: string;
   TIPPESSOA: 'F' | 'J';
   CLIENTE: 'S' | 'N';
   ATIVO: 'S' | 'N';
   CODCID: string;
-  CLASSIFICMS: string;
-  CGC_CPF: string;
-  EMAIL: string;
-  TELEFONE: string;
-  CEP: string;
-  NUMEND: string;
+  // opc
+  CLASSIFICMS?: string;
+  CGC_CPF?: string;
+  AD_INTEGRADOR?: 'S' | 'N';
+  RAZAOSOCIAL?: string;
+  EMAIL?: string;
+  TELEFONE?: string;
+  CEP?: string;
+  NUMEND?: string;
   COMPLEMENTO?: string;
   SEXO?: 'M' | 'F';
   DTNASC?: string;
   IDENTINSCESTAD?: string;
 };
+
 
 export type SankhyaOrderHeaderInput = {
   CODPARC: number;
@@ -69,4 +74,31 @@ export type SankhyaMovimentarInput = {
     QTDMOV: number;
     UNIDADE: string;
   }[];
+};
+
+export type SankhyaPartner = {
+  codparc: number;
+  nomeparc: string;
+  razaosocial?: string;
+  tippessoa: 'F' | 'J';
+  CGC_CPF: string;
+  CLIENTE: 'S' | 'N';
+  AD_INTEGRADOR?: string | null;
+  ATIVO: 'S' | 'N';
+  CODCID?: string;
+  EMAIL?: string;
+  TELEFONE?: string;
+  CEP?: string;
+};
+
+export type SankhyaCity = {
+    codcid: number;
+    nomecid: string;
+    uf: string;
+};
+
+export type SankhyaVendedor = {
+    codvend: number;
+    apelido: string;
+    ativo: string;
 };

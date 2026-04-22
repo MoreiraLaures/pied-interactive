@@ -2,6 +2,9 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import {
   SankhyaPartnerInput,
+  SankhyaPartner,
+  SankhyaCity,
+  SankhyaVendedor,
   SankhyaOrderHeaderInput,
   SankhyaOrderItemInput,
   SankhyaLinkOpInput,
@@ -26,6 +29,44 @@ class SankhyaClient {
     const { data } = await axios.post(`${this.baseUrl}/partners`, payload);
     return data;
   }
+
+  async findPartnerByDoc(doc: string): Promise<SankhyaPartner | null> {
+    const digits = doc.replace(/\D/g, '');
+    try {
+      const { data } = await axios.get<SankhyaPartner>(`${this.baseUrl}/partners/by-doc/${digits}`);
+      return data;
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) return null;
+      throw err;
+    }
+  }
+
+    async findCityByName(state: string, name: string): Promise<SankhyaCity | null> {
+    const url = `${this.baseUrl}/cities/by-name/${state.toUpperCase()}/${encodeURIComponent(name)}`;
+    try {
+      const { data } = await axios.get<SankhyaCity>(url);
+      return data;
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) return null;
+      throw err;
+    }
+  }
+
+    async findOrCreateCity(state: string, name: string): Promise<SankhyaCity> {
+    const { data } = await axios.post<SankhyaCity>(`${this.baseUrl}/cities`, {
+      state: state.toUpperCase(),
+      name,
+    });
+    return data;
+  }
+
+    async listVendedores(): Promise<SankhyaVendedor[]> {
+    const { data } = await axios.get<{ count: number; vendedores: SankhyaVendedor[] }>(
+      `${this.baseUrl}/vendedores`
+    );
+    return data.vendedores;
+  }
+
 
   async createOrderHeader(payload: SankhyaOrderHeaderInput) {
     const { data } = await axios.post(`${this.baseUrl}/orders/header`, payload);
