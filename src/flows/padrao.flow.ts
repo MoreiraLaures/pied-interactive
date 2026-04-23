@@ -3,6 +3,7 @@ import { sankhyaClient } from '../class/sankhya.class';
 import { SankhyaPartnerInput } from '../types/sankhya.types';
 import { enrichOrderAddresses } from '../services/address.enricher';
 import { resolvePartner, PartnerSourceData } from '../services/partner.resolver';
+import { resolveVendedor } from '../services/vendedor.resolver';
 import { log } from '../db/logger';
 import { pool } from '../db/pool';
 
@@ -12,6 +13,11 @@ const KIT_CODPROD_HIGH = 18;
 const KIT_CODPROD_LOW  = 21;
 
 const PLANTA = 1;
+
+const CABOS_CODPROD = new Set([44, 45, 46, 47]);
+const CABOS_METROS_POR_UNIDADE = 25;
+const CODPROD_X50 = 106;
+const MULTIPLICADOR_X50 = 50;
 
 const HEADER_DEFAULTS = {
     CODTIPOPER:  1001,
@@ -36,8 +42,8 @@ const OPERACAO_DEFAULT = {
 
 export function matchesPadrao(order: Order): boolean {
     return (
-        order.requestStatus === 'Padrão' &&
-        order.dealStatus    === 'Padrão' &&
+        order.requestStatus === 'teste' &&
+        order.dealStatus    === 'teste' &&
         order.kind          === 'Kit Personalizado'
     );
 }
@@ -59,14 +65,6 @@ function companyToSource(order: Order): PartnerSourceData {
         codcid:      c.address.codcid,
     };
 }
-
-function responsibleToOrder(order: Order): PartnerSourceData {
-    const r = order.responsible;
-    if (!r?.name) {
-        throw new Error(`[padrao] responsible.name não resolvido pra ${order.code}`);
-    }
-    return name: r?.name + r?.surname,
-};
 
 function invoiceToSource(order: Order): PartnerSourceData {
     const i = order.invoice;
@@ -94,6 +92,32 @@ function formatDateBR(d: Date): string {
 
 function pickCodprod(totalPower: number): number {
     return totalPower >= 75 ? KIT_CODPROD_HIGH : KIT_CODPROD_LOW;
+}
+
+function buildMaterial(p: { productCode: string; quantity: number }) {
+    const codprod = Number(p.productCode);
+    if (CABOS_CODPROD.has(codprod)) {
+        return {
+            CODPRODMP:  codprod,
+            CONTROLEMP: '',
+            QTDMOV:     p.quantity * CABOS_METROS_POR_UNIDADE,
+            UNIDADE:    'MT',
+        };
+    }
+    if (codprod === CODPROD_X50) {
+        return {
+            CODPRODMP:  codprod,
+            CONTROLEMP: '',
+            QTDMOV:     p.quantity * MULTIPLICADOR_X50,
+            UNIDADE:    'UN',
+        };
+    }
+    return {
+        CODPRODMP:  codprod,
+        CONTROLEMP: '',
+        QTDMOV:     p.quantity,
+        UNIDADE:    'UN',
+    };
 }
 
 export async function runPadraoFlow(order: Order): Promise<void> {
@@ -130,11 +154,20 @@ export async function runPadraoFlow(order: Order): Promise<void> {
         },
     });
 
+    const vendedor = await resolveVendedor(order);
+    const codvend  = vendedor?.codvend ?? VENDEDOR_PADRAO;
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: `CODVEND resolvido: ${codvend}`,
+        context: { codvend, matched: vendedor !== null, fallback: vendedor === null },
+    });
+
     const headerInput = {
         CODPARC:          cliente.codparc,
         ...HEADER_DEFAULTS,
         DTNEG:            formatDateBR(new Date()),
-        CODVEND:          VENDEDOR_PADRAO,
+        CODVEND:          codvend,
         AD_NROINTEGRACAO: order.code,
         AD_CODPARCINT:    integrador.codparc,
     };
@@ -218,12 +251,7 @@ export async function runPadraoFlow(order: Order): Promise<void> {
         context: { idiproc, idiatv },
     });
 
-    const materiais = order.products.map(p => ({
-        CODPRODMP:  Number(p.productCode),
-        CONTROLEMP: '',
-        QTDMOV:     p.quantity,
-        UNIDADE:    'UN',
-    }));
+    const materiais = order.products.map(buildMaterial);
 
     await sankhyaClient.addRawMaterials({
         idiproc,

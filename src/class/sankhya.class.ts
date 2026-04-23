@@ -77,6 +77,17 @@ class SankhyaClient {
     );
     return data.vendedores;
   }
+async findVendedorByEmail(email: string): Promise<SankhyaVendedor | null> {
+    try {
+        const { data } = await axios.get<SankhyaVendedor>(
+            `${this.baseUrl}/vendedores/by-email/${encodeURIComponent(email)}`
+        );
+        return data;
+    } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 404) return null;
+        throw err;
+    }
+}
 
   async findVendedorByApelido(apelido: string): Promise<SankhyaVendedor | null> {
     try {
