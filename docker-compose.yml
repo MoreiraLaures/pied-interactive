@@ -5,10 +5,10 @@ services:
     restart: always
     environment:
       POSTGRES_DB: sankhya_tool
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin123
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 3131
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql:/docker-entrypoint-initdb.d
@@ -24,7 +24,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      DATABASE_URL: postgres://admin:admin123@postgres:5432/sankhya_tool
+      DATABASE_URL: postgres://postgres:3131@postgres:5432/sankhya_tool
       SANKHYA_SERVICE_URL: http://host.docker.internal:3030
 
 volumes:

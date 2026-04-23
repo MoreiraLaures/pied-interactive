@@ -30,6 +30,17 @@ class SankhyaClient {
     return data;
   }
 
+  async updatePartner(
+  codparc: number,
+  patch: Partial<SankhyaPartnerInput>
+): Promise<Partial<SankhyaPartner> & { codparc: number }> {
+  const { data } = await axios.patch<Partial<SankhyaPartner> & { codparc: number }>(
+    `${this.baseUrl}/partners/${codparc}`,
+    patch
+  );
+  return data;
+}
+
   async findPartnerByDoc(doc: string): Promise<SankhyaPartner | null> {
     const digits = doc.replace(/\D/g, '');
     try {
@@ -66,6 +77,18 @@ class SankhyaClient {
     );
     return data.vendedores;
   }
+
+  async findVendedorByApelido(apelido: string): Promise<SankhyaVendedor | null> {
+    try {
+        const { data } = await axios.get<SankhyaVendedor>(
+            `${this.baseUrl}/vendedores/by-apelido/${encodeURIComponent(apelido)}`
+        );
+        return data;
+    } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 404) return null;
+        throw err;
+    }
+}
 
 
   async createOrderHeader(payload: SankhyaOrderHeaderInput) {

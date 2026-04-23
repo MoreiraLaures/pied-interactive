@@ -1,17 +1,25 @@
 import { Order } from '../types/order.types';
 import { sankhyaClient } from '../class/sankhya.class';
+import { SankhyaPartnerInput } from '../types/sankhya.types';
 import { enrichOrderAddresses } from '../services/address.enricher';
 import { resolvePartner, PartnerSourceData } from '../services/partner.resolver';
 import { log } from '../db/logger';
 import { pool } from '../db/pool';
-import { CODTIPOPER, CODEMP, CODTIPVENDA, CODNAT, CODCENCUS } from '../config';
 
-// TODO: virar lógica dinâmica de detecção de vendedor
 const VENDEDOR_PADRAO = 19;
 
-// constantes do item Kit Personalizado
-const KIT_CODPROD_HIGH = 18;   // totalPower >= 75
-const KIT_CODPROD_LOW  = 21;   // totalPower < 75
+const KIT_CODPROD_HIGH = 18;
+const KIT_CODPROD_LOW  = 21;
+
+const PLANTA = 1;
+
+const HEADER_DEFAULTS = {
+    CODTIPOPER:  1001,
+    CODEMP:      1,
+    CODTIPVENDA: 19,
+    CODNAT:      1010102,
+    CODCENCUS:   102001,
+} as const;
 
 const ITEM_DEFAULTS = {
     QTDNEG:       1,
@@ -19,6 +27,11 @@ const ITEM_DEFAULTS = {
     CODLOCALORIG: 101,
     CODTRIB:      40,
     CSTIPI:       99,
+} as const;
+
+const OPERACAO_DEFAULT = {
+    IDEFX:   400,
+    SEQOPER: 1,
 } as const;
 
 export function matchesPadrao(order: Order): boolean {
@@ -46,6 +59,14 @@ function companyToSource(order: Order): PartnerSourceData {
         codcid:      c.address.codcid,
     };
 }
+
+function responsibleToOrder(order: Order): PartnerSourceData {
+    const r = order.responsible;
+    if (!r?.name) {
+        throw new Error(`[padrao] responsible.name não resolvido pra ${order.code}`);
+    }
+    return name: r?.name + r?.surname,
+};
 
 function invoiceToSource(order: Order): PartnerSourceData {
     const i = order.invoice;
@@ -82,10 +103,8 @@ export async function runPadraoFlow(order: Order): Promise<void> {
         context: { totalPower: order.totalPower, totalValue: order.totalValue, finalValue: order.finalValue },
     });
 
-    // 1. enrich addresses (resolve codcid via Sankhya)
     await enrichOrderAddresses(order);
 
-    // 2. resolver parceiros (find or create no Sankhya)
     const integradorSrc = companyToSource(order);
     const integrador    = await resolvePartner(integradorSrc, 'integrador', order.code);
 
@@ -95,15 +114,26 @@ export async function runPadraoFlow(order: Order): Promise<void> {
         === (clienteSrc.cnpj || clienteSrc.cpf || '').replace(/\D/g, '');
     const cliente = sameDoc ? integrador : await resolvePartner(clienteSrc, 'cliente', order.code);
 
-    // 3. createOrderHeader
+    const ensureFlags: Partial<SankhyaPartnerInput> = { CLIENTE: 'S', ATIVO: 'S' };
+    await sankhyaClient.updatePartner(integrador.codparc, ensureFlags);
+    if (!sameDoc) {
+        await sankhyaClient.updatePartner(cliente.codparc, ensureFlags);
+    }
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: 'Flags garantidas nos parceiros (CLIENTE=S, ATIVO=S)',
+        context: {
+            codparcCliente: cliente.codparc,
+            codparcInteg:   integrador.codparc,
+            mergedWithIntegrador: sameDoc,
+        },
+    });
+
     const headerInput = {
         CODPARC:          cliente.codparc,
-        CODTIPOPER,
+        ...HEADER_DEFAULTS,
         DTNEG:            formatDateBR(new Date()),
-        CODEMP,
-        CODTIPVENDA,
-        CODNAT,
-        CODCENCUS,
         CODVEND:          VENDEDOR_PADRAO,
         AD_NROINTEGRACAO: order.code,
         AD_CODPARCINT:    integrador.codparc,
@@ -118,9 +148,8 @@ export async function runPadraoFlow(order: Order): Promise<void> {
         context: { nunota, headerInput },
     });
 
-    // 4. createOrderItem (item único representando o kit)
     const codprod = pickCodprod(order.totalPower);
-    const valor   = order.finalValue;     // <— CONFIRMAR )
+    const valor   = order.finalValue;
 
     const itemInput = {
         NUNOTA:   nunota,
@@ -139,16 +168,76 @@ export async function runPadraoFlow(order: Order): Promise<void> {
         context: { itemInput, totalPower: order.totalPower },
     });
 
-    // 5. confirmNF
     await sankhyaClient.confirmNF({ NUNOTA: nunota });
 
     await log({
         level: 'info', source: 'flow.padrao', piedCode: order.code,
-        message: 'NF confirmada — fluxo Padrão completo',
+        message: 'NF confirmada',
         context: { nunota, codparcCliente: cliente.codparc, codparcInteg: integrador.codparc },
     });
 
-    // 6. rastreabilidade
+    const producao = await sankhyaClient.startProduction({
+        planta: PLANTA,
+        itens:  [{ NUNOTA: nunota }],
+    });
+    const nulop = Number(producao.nulop);
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: `Produção criada, NULOP=${nulop}`,
+        context: { nulop, planta: PLANTA, nunota },
+    });
+
+    const confirmProd = await sankhyaClient.confirmProduction({ nulop });
+    const idiproc = Number(confirmProd.ordens[0]);
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: `Produção confirmada, IDIPROC=${idiproc}`,
+        context: { nulop, idiproc, ordens: confirmProd.ordens, ordensIniciadas: confirmProd.ordensIniciadas },
+    });
+
+    const atividadesResp = await sankhyaClient.getProductionAtividades(idiproc);
+    const primeiraAtividade = atividadesResp.atividades[0];
+    if (!primeiraAtividade) {
+        throw new Error(`[padrao] nenhuma atividade retornada para IDIPROC=${idiproc}`);
+    }
+    const idiatv = Number(primeiraAtividade.IDIATV);
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: `Atividade resolvida, IDIATV=${idiatv}`,
+        context: { idiproc, idiatv, atividade: primeiraAtividade },
+    });
+
+    await sankhyaClient.startActivity({ IDIATV: idiatv });
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: `Atividade iniciada, IDIATV=${idiatv}`,
+        context: { idiproc, idiatv },
+    });
+
+    const materiais = order.products.map(p => ({
+        CODPRODMP:  Number(p.productCode),
+        CONTROLEMP: '',
+        QTDMOV:     p.quantity,
+        UNIDADE:    'UN',
+    }));
+
+    await sankhyaClient.addRawMaterials({
+        idiproc,
+        idiatv,
+        operacao:  { ...OPERACAO_DEFAULT },
+        materiais,
+    });
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: 'Matérias-primas movimentadas — fluxo Padrão completo',
+        context: { idiproc, idiatv, materiais },
+    });
+
     await pool.query(
         `INSERT INTO sankhya_orders (nunota, codparc, pied_code)
          VALUES ($1, $2, $3)
