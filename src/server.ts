@@ -2,6 +2,7 @@ import express, {Router, Request, Response } from 'express';
 import dotenv from 'dotenv';
 import orderWebhook from './webhook/order';
 import help from './webhook/help';
+import reprocess from './webhook/reprocess';
 
 dotenv.config()
 
@@ -11,7 +12,8 @@ app.use(express.json({ limit: '10mb' }));
 
 
 app.use('/', orderWebhook);
-app.use('/',help)
+app.use('/', help);
+app.use('/', reprocess);
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

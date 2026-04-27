@@ -1,23 +1,31 @@
+import type { PoolClient } from 'pg';
 import { Order } from '../types/order.types';
 import { matchesPadrao, runPadraoFlow } from '../flows/padrao.flow';
 import { log } from '../db/logger';
 import { pool } from '../db/pool';
 import { tryLockPiedCode } from '../db/locks';
+import {
+    createPending,
+    markProcessing,
+    markCompleted,
+    markFailed,
+} from '../db/repos/integrationLog.repo';
+import { notifyFlowCompleted, notifyFlowFailed } from './email/notifier';
 
 type Flow = {
     name: string;
     matches: (order: Order) => boolean;
-    run:     (order: Order) => Promise<void>;
+    run:     (order: Order, integrationId: number) => Promise<void>;
 };
 
 const flows: Flow[] = [
     { name: 'padrao', matches: matchesPadrao, run: runPadraoFlow },
-    // adicionar novos flows aqui no futuro
+    // novos flows aqui
 ];
 
 export async function processOrder(order: Order): Promise<void> {
     const flow = flows.find(f => f.matches(order));
-    if (!flow) return;  // nenhum flow casou, nada a fazer
+    if (!flow) return;
 
     // 1. Skip por completação — pré-check rápido sem lock
     const completed = await checkAlreadyCompleted(order.code);
@@ -43,7 +51,7 @@ export async function processOrder(order: Order): Promise<void> {
             return;
         }
 
-        // 3. Re-check dentro do lock — janela entre o pré-check e o lock pode ter inserido
+        // 3. Re-check dentro do lock
         const recheck = await checkAlreadyCompleted(order.code, client);
         if (recheck) {
             await log({
@@ -54,22 +62,31 @@ export async function processOrder(order: Order): Promise<void> {
             return;
         }
 
-        // 4. Roda o flow
+        // 4. Cria registro em integration_log e marca processing
+        const integrationId = await createPending(order.code, flow.name);
+        await markProcessing(integrationId);
+
+        // 5. Roda o flow passando o integrationId pra rastreamento dos steps
         try {
-            await flow.run(order);
+            await flow.run(order, integrationId);
+            await markCompleted(integrationId, order.code);
+            // fire-and-forget — falha de email não derruba o flow
+            notifyFlowCompleted(integrationId, order.code).catch(() => {});
         } catch (err) {
+            const errorMessage = err instanceof Error
+                ? `${err.message}\n${err.stack ?? ''}`
+                : String(err);
+            await markFailed(integrationId, errorMessage);
             await log({
                 level: 'error', source: 'processor', piedCode: order.code,
                 message: `Flow '${flow.name}' falhou`,
-                context: {
-                    error: err instanceof Error ? err.message : String(err),
-                    stack: err instanceof Error ? err.stack : undefined,
-                },
+                context: { integrationId, error: errorMessage },
             });
+            notifyFlowFailed(integrationId, order.code).catch(() => {});
             // não relança — falha de flow individual não derruba o webhook
         }
     } finally {
-        client.release();   // libera o advisory lock automaticamente
+        client.release();
     }
 }
 
@@ -93,6 +110,3 @@ async function checkAlreadyCompleted(
     );
     return rows[0] ?? null;
 }
-
-// import-only type pra não causar circular
-import type { PoolClient } from 'pg';

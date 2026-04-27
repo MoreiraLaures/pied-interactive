@@ -26,6 +26,9 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:3131@postgres:5432/sankhya_tool
       SANKHYA_SERVICE_URL: http://host.docker.internal:3030
+      # força DNS preferir IPv4 — Docker network sem IPv6, login.microsoftonline.com
+      # resolve só pra AAAA (IPv6) e dava ENETUNREACH no fetch do Graph
+      NODE_OPTIONS: --dns-result-order=ipv4first
 
 volumes:
   postgres_data:
