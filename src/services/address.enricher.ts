@@ -3,7 +3,6 @@ import { Address } from '../types/shared.types';
 import { sankhyaClient } from '../class/sankhya.class';
 import { log } from '../db/logger';
 
-// cidades não mudam — cache em memória
 const cityCache = new Map<string, number>();
 const cacheKey = (state: string, normalizedName: string) =>
     `${state.toUpperCase()}|${normalizedName}`;

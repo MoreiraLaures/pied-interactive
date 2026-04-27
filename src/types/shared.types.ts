@@ -18,8 +18,3 @@ export type Contact = {
     email: string;
 }
 
-export type SankhyaVendedor = {
-    codvend: number;
-    apelido: string;
-    ativo: string;
-};

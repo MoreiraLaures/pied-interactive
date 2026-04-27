@@ -269,7 +269,7 @@ export async function runPadraoFlow(order: Order): Promise<void> {
     await pool.query(
         `INSERT INTO sankhya_orders (nunota, codparc, pied_code)
          VALUES ($1, $2, $3)
-         ON CONFLICT (nunota) DO NOTHING`,
+         ON CONFLICT (pied_code) DO NOTHING`,
         [nunota, cliente.codparc, order.code]
     );
 }
