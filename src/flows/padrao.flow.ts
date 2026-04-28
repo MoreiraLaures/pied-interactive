@@ -19,10 +19,13 @@ const CABOS_CODPROD = new Set([44, 45, 46, 47]); // olhar pq pode mudar
 const CABOS_METROS_POR_UNIDADE = 25;
 const CODPROD_X50 = 106; // autobrocante, pode mudar
 const MULTIPLICADOR_X50 = 50;
+const CHICOTE_CABO = new Set([4448 , 4446]);
+const MULTIPLICADOR_x1_5 = 1.5;
+
 
 const HEADER_DEFAULTS = {
     CODTIPOPER:  1001, // Pedido de venda
-    CODEMP:      1,  
+    CODEMP:      1,
     CODTIPVENDA: 36,  //definir lógica ( ANTECIPADO )
     CODNAT:      1010102, //natureza
     CODCENCUS:   102001, //Centro Resultado
@@ -38,7 +41,7 @@ const ITEM_DEFAULTS = {
 
 const OPERACAO_DEFAULT = {
     IDEFX:   400,  // verificar
-    SEQOPER: 1, // verificar 
+    SEQOPER: 1, // verificar
 } as const;
 
 export function matchesPadrao(order: Order): boolean {
@@ -46,7 +49,6 @@ export function matchesPadrao(order: Order): boolean {
         order.requestStatus === 'teste' && // a definir status
         order.dealStatus    === 'teste' &&
         order.kind          === 'Kit Personalizado'
-        
     );
 }
 
@@ -105,7 +107,15 @@ function buildMaterial(p: { productCode: string; quantity: number }) {
             QTDMOV:     p.quantity * CABOS_METROS_POR_UNIDADE,
             UNIDADE:    'MT',
         };
+    } else if (CHICOTE_CABO.has(codprod)) {
+        return {
+            CODPRODMP:  codprod,
+            CONTROLEMP: '',
+            QTDMOV:     p.quantity * MULTIPLICADOR_x1_5,
+            UNIDADE:    'MT',
+        };
     }
+
     if (codprod === CODPROD_X50) {
         return {
             CODPRODMP:  codprod,
@@ -123,7 +133,7 @@ function buildMaterial(p: { productCode: string; quantity: number }) {
 }
 
 /**
- * Flow Padrão (Kit Personalizado) — agora dividido em 14 steps rastreados em
+ * Flow Padrão (Kit Personalizado) — agora dividido em 16 steps rastreados em
  * integration_log_steps. Cada step.run(name, index, fn):
  *   - se já completou nessa execução (resume) → retorna payload salvo, pula fn
  *   - senão executa fn, salva payload, marca completed/failed
@@ -256,20 +266,8 @@ export async function runPadraoFlow(order: Order, integrationId: number): Promis
         context: { itemInput, totalPower: order.totalPower },
     });
 
-    // ─── STEP 8: confirma a NF ─────────────────────────────────────────────
-    await steps.run('confirm_nf', 8, async () => {
-        await sankhyaClient.confirmNF({ NUNOTA: nunota });
-        return { nunota };
-    });
-
-    await log({
-        level: 'info', source: 'flow.padrao', piedCode: order.code,
-        message: 'NF confirmada',
-        context: { nunota, codparcCliente: cliente.codparc, codparcInteg: integrador.codparc },
-    });
-
-    // ─── STEP 9: cria OP (LancamentoOrdemProducaoSP.lancarOPPeloItemDoPedido) ──
-    const { nulop } = await steps.run<{ nulop: number }>('start_production', 9, async () => {
+    // ─── STEP 8: cria OP (LancamentoOrdemProducaoSP.lancarOPPeloItemDoPedido) ──
+    const { nulop } = await steps.run<{ nulop: number }>('start_production', 8, async () => {
         const producao = await sankhyaClient.startProduction({
             planta: PLANTA,
             itens:  [{ NUNOTA: nunota }],
@@ -283,10 +281,10 @@ export async function runPadraoFlow(order: Order, integrationId: number): Promis
         context: { nulop, planta: PLANTA, nunota },
     });
 
-    // ─── STEP 10: confirma OP → IDIPROC ────────────────────────────────────
+    // ─── STEP 9: confirma OP → IDIPROC ─────────────────────────────────────
     const confirmProd = await steps.run<{ ordens: number[]; ordensIniciadas: unknown }>(
         'confirm_production',
-        10,
+        9,
         async () => {
             const r = await sankhyaClient.confirmProduction({ nulop });
             return { ordens: r.ordens, ordensIniciadas: r.ordensIniciadas };
@@ -300,28 +298,36 @@ export async function runPadraoFlow(order: Order, integrationId: number): Promis
         context: { nulop, idiproc, ordens: confirmProd.ordens, ordensIniciadas: confirmProd.ordensIniciadas },
     });
 
-    // ─── STEP 11: lista atividades, pega primeira IDIATV ───────────────────
-    const { idiatv, atividade } = await steps.run<{ idiatv: number; atividade: unknown }>(
+    // ─── STEP 10: lista atividades, pega primeira IDIATV + IDPROC ──────────
+    const { idiatv, idproc, atividade } = await steps.run<{
+        idiatv: number;
+        idproc: number;
+        atividade: unknown;
+    }>(
         'list_activities',
-        11,
+        10,
         async () => {
             const atividadesResp = await sankhyaClient.getProductionAtividades(idiproc);
             const primeira = atividadesResp.atividades[0];
             if (!primeira) {
                 throw new Error(`[padrao] nenhuma atividade retornada para IDIPROC=${idiproc}`);
             }
-            return { idiatv: Number(primeira.IDIATV), atividade: primeira };
+            return {
+                idiatv:    Number(primeira.IDIATV),
+                idproc:    Number(primeira.IDPROC),
+                atividade: primeira,
+            };
         },
     );
 
     await log({
         level: 'info', source: 'flow.padrao', piedCode: order.code,
-        message: `Atividade resolvida, IDIATV=${idiatv}`,
-        context: { idiproc, idiatv, atividade },
+        message: `Atividade resolvida, IDIATV=${idiatv}, IDPROC=${idproc}`,
+        context: { idiproc, idiatv, idproc, atividade },
     });
 
-    // ─── STEP 12: inicia atividade ─────────────────────────────────────────
-    await steps.run('start_activity', 12, async () => {
+    // ─── STEP 11: inicia atividade ─────────────────────────────────────────
+    await steps.run('start_activity', 11, async () => {
         await sankhyaClient.startActivity({ IDIATV: idiatv });
         return { idiatv };
     });
@@ -332,10 +338,10 @@ export async function runPadraoFlow(order: Order, integrationId: number): Promis
         context: { idiproc, idiatv },
     });
 
-    // ─── STEP 13: movimenta matérias-primas ────────────────────────────────
+    // ─── STEP 12: movimenta matérias-primas (gera PA em estoque) ───────────
     const materiais = order.products.map(buildMaterial);
 
-    await steps.run('add_raw_materials', 13, async () => {
+    await steps.run('add_raw_materials', 12, async () => {
         await sankhyaClient.addRawMaterials({
             idiproc,
             idiatv,
@@ -347,12 +353,48 @@ export async function runPadraoFlow(order: Order, integrationId: number): Promis
 
     await log({
         level: 'info', source: 'flow.padrao', piedCode: order.code,
-        message: 'Matérias-primas movimentadas — fluxo Padrão completo',
+        message: 'Matérias-primas movimentadas — PA disponível em estoque',
         context: { idiproc, idiatv, materiais },
     });
 
-    // ─── STEP 14: persiste linha em sankhya_orders (idempotência) ─────────
-    await steps.run('persist_sankhya_order', 14, async () => {
+    // ─── STEP 13: suspende OP (fecha execução em aberto do user-API) ───────
+    await steps.run('pause_op', 13, async () => {
+        await sankhyaClient.suspendOrder({ idiproc, idproc });
+        return { idiproc, idproc };
+    });
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: `OP suspensa, IDIPROC=${idiproc}`,
+        context: { idiproc, idproc },
+    });
+
+    // ─── STEP 14: reativa OP (status volta a Ativa pro operador) ───────────
+    await steps.run('resume_op', 14, async () => {
+        await sankhyaClient.resumeOrder({ idiproc, idproc });
+        return { idiproc, idproc };
+    });
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: `OP reativada, IDIPROC=${idiproc} — pronta pro operador finalizar pela UI`,
+        context: { idiproc, idproc },
+    });
+
+    // ─── STEP 15: confirma a NF (agora com PA já produzido) ────────────────
+    await steps.run('confirm_nf', 15, async () => {
+        await sankhyaClient.confirmNF({ NUNOTA: nunota });
+        return { nunota };
+    });
+
+    await log({
+        level: 'info', source: 'flow.padrao', piedCode: order.code,
+        message: 'NF confirmada — fluxo Padrão completo',
+        context: { nunota, codparcCliente: cliente.codparc, codparcInteg: integrador.codparc },
+    });
+
+    // ─── STEP 16: persiste linha em sankhya_orders (idempotência) ─────────
+    await steps.run('persist_sankhya_order', 16, async () => {
         await pool.query(
             `INSERT INTO sankhya_orders (nunota, codparc, pied_code)
              VALUES ($1, $2, $3)

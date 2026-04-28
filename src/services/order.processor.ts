@@ -9,6 +9,7 @@ import {
     markProcessing,
     markCompleted,
     markFailed,
+    findLatestFailedByCode,
 } from '../db/repos/integrationLog.repo';
 import { notifyFlowCompleted, notifyFlowFailed } from './email/notifier';
 
@@ -62,9 +63,21 @@ export async function processOrder(order: Order): Promise<void> {
             return;
         }
 
-        // 4. Cria registro em integration_log e marca processing
-        const integrationId = await createPending(order.code, flow.name);
+        const lastFailed = await findLatestFailedByCode(order.code);
+        const isResume = !!(lastFailed && lastFailed.flow_name === flow.name);
+        const integrationId = isResume
+            ? lastFailed!.id
+            : await createPending(order.code, flow.name);
+
         await markProcessing(integrationId);
+
+        await log({
+            level: 'info', source: 'processor', piedCode: order.code,
+            message: isResume
+                ? `Retomando execução failed anterior (id=${integrationId})`
+                : `Nova execução criada (id=${integrationId})`,
+            context: { integrationId, flow: flow.name, isResume },
+        });
 
         // 5. Roda o flow passando o integrationId pra rastreamento dos steps
         try {

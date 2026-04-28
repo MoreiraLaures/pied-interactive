@@ -13,6 +13,8 @@ import {
   SankhyaProductionConfirmInput,
   SankhyaProductionIniciarInput,
   SankhyaMovimentarInput,
+  SankhyaProductionFinalizarInput,
+  SankhyaSuspenderOrdemInput, SankhyaInicializarOrdemInput
 } from '../types/sankhya.types';
 
 dotenv.config();
@@ -141,6 +143,23 @@ async findVendedorByEmail(email: string): Promise<SankhyaVendedor | null> {
     const { data } = await axios.post(`${this.baseUrl}/production/iniciar`, payload);
     return data;
   }
+
+  async finishActivity(payload: SankhyaProductionFinalizarInput) {
+  const { data } = await axios.post(`${this.baseUrl}/production/finalizar`, payload);
+  return data;
+}
+
+async suspendOrder(payload: SankhyaSuspenderOrdemInput) {
+  const { data } = await axios.post(`${this.baseUrl}/production/suspender`, payload);
+  return data;
+}
+
+async resumeOrder(payload: SankhyaInicializarOrdemInput) {
+  const { data } = await axios.post(`${this.baseUrl}/production/inicializar`, payload);
+  return data;
+}
+
+
 
   async addRawMaterials(payload: SankhyaMovimentarInput) {
     const { data } = await axios.post(`${this.baseUrl}/production/movimentar`, payload);

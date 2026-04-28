@@ -62,6 +62,9 @@ export type SankhyaProductionInput = {
 
 export type SankhyaProductionConfirmInput = { nulop: number };
 
+export type SankhyaProductionFinalizarInput = { IDIATV: number };
+
+
 export type SankhyaProductionIniciarInput = { IDIATV: number };
 
 export type SankhyaMovimentarInput = {
@@ -102,3 +105,6 @@ export type SankhyaVendedor = {
     apelido: string;
     ativo: string;
 };
+
+export type SankhyaSuspenderOrdemInput   = { idiproc: number; idproc: number };
+export type SankhyaInicializarOrdemInput = { idiproc: number; idproc: number };
