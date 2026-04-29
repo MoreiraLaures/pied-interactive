@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { Order } from '../types/order.types';
-import { matchesPadrao, runPadraoFlow } from '../flows/padrao.flow';
+import { matchesPadrao, runPadraoFlow, PartialCompleteSignal } from '../flows/padrao.flow';
 import { log } from '../db/logger';
 import { pool } from '../db/pool';
 import { tryLockPiedCode } from '../db/locks';
@@ -9,9 +9,12 @@ import {
     markProcessing,
     markCompleted,
     markFailed,
+    markPartialComplete,
     findLatestFailedByCode,
+    findLatestPartialByCode,
+    type IntegrationLogRow,
 } from '../db/repos/integrationLog.repo';
-import { notifyFlowCompleted, notifyFlowFailed } from './email/notifier';
+import { notifyFlowCompleted, notifyFlowFailed, notifyFlowStage1 } from './email/notifier';
 
 type Flow = {
     name: string;
@@ -63,10 +66,16 @@ export async function processOrder(order: Order): Promise<void> {
             return;
         }
 
-        const lastFailed = await findLatestFailedByCode(order.code);
-        const isResume = !!(lastFailed && lastFailed.flow_name === flow.name);
+        // Reusa o id de uma execução incompleta anterior (failed OU partial_complete),
+        // pegando a mais recente. O StepRunner pula automaticamente os steps já
+        // 'completed' nesse integration_id e segue do que falta.
+        const lastFailed  = await findLatestFailedByCode(order.code);
+        const lastPartial = await findLatestPartialByCode(order.code);
+        const lastIncomplete = pickMostRecent(lastFailed, lastPartial);
+
+        const isResume = !!(lastIncomplete && lastIncomplete.flow_name === flow.name);
         const integrationId = isResume
-            ? lastFailed!.id
+            ? lastIncomplete!.id
             : await createPending(order.code, flow.name);
 
         await markProcessing(integrationId);
@@ -74,9 +83,12 @@ export async function processOrder(order: Order): Promise<void> {
         await log({
             level: 'info', source: 'processor', piedCode: order.code,
             message: isResume
-                ? `Retomando execução failed anterior (id=${integrationId})`
+                ? `Retomando execução anterior (id=${integrationId}, status=${lastIncomplete!.status})`
                 : `Nova execução criada (id=${integrationId})`,
-            context: { integrationId, flow: flow.name, isResume },
+            context: {
+                integrationId, flow: flow.name, isResume,
+                previousStatus: lastIncomplete?.status ?? null,
+            },
         });
 
         // 5. Roda o flow passando o integrationId pra rastreamento dos steps
@@ -86,6 +98,19 @@ export async function processOrder(order: Order): Promise<void> {
             // fire-and-forget — falha de email não derruba o flow
             notifyFlowCompleted(integrationId, order.code).catch(() => {});
         } catch (err) {
+            // PartialCompleteSignal NÃO é falha — é o flow sinalizando que
+            // completou o estágio 1 e está aguardando a transição pra teste2.
+            if (err instanceof PartialCompleteSignal) {
+                await markPartialComplete(integrationId, err.message);
+                await log({
+                    level: 'info', source: 'processor', piedCode: order.code,
+                    message: `Flow '${flow.name}' completou estágio 1 — aguardando estágio 2`,
+                    context: { integrationId, reason: err.message },
+                });
+                notifyFlowStage1(integrationId, order.code).catch(() => {});
+                return;
+            }
+
             const errorMessage = err instanceof Error
                 ? `${err.message}\n${err.stack ?? ''}`
                 : String(err);
@@ -101,6 +126,15 @@ export async function processOrder(order: Order): Promise<void> {
     } finally {
         client.release();
     }
+}
+
+function pickMostRecent(
+    a: IntegrationLogRow | null,
+    b: IntegrationLogRow | null,
+): IntegrationLogRow | null {
+    if (!a) return b;
+    if (!b) return a;
+    return new Date(a.created_at) >= new Date(b.created_at) ? a : b;
 }
 
 type CompletedRow = {

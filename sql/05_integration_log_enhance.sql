@@ -58,3 +58,8 @@ CREATE INDEX IF NOT EXISTS integration_log_steps_integration_idx
 CREATE INDEX IF NOT EXISTS integration_log_steps_completed_idx
     ON integration_log_steps(integration_id, step_name)
     WHERE status = 'completed';
+
+-- 4) Índice para localizar rapidamente partial por pied_code (estágio A → B)
+CREATE INDEX IF NOT EXISTS integration_log_partial_idx
+    ON integration_log(pied_code, status, created_at DESC)
+    WHERE status = 'partial_complete';

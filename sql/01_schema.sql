@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS sankhya_orders (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TYPE integration_status AS ENUM ('pending', 'processing', 'completed', 'failed');
+CREATE TYPE integration_status AS ENUM ('pending', 'processing', 'partial_complete', 'completed', 'failed');
 
 CREATE TABLE IF NOT EXISTS integration_log (
     id            SERIAL PRIMARY KEY,

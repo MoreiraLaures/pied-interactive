@@ -22,6 +22,13 @@ const MULTIPLICADOR_X50 = 50;
 const CHICOTE_CABO = new Set([4448 , 4446]);
 const MULTIPLICADOR_x1_5 = 1.5;
 
+// Status que disparam cada estágio do flow no Pied.
+// Centralizados aqui pra trocar facilmente quando os nomes definitivos forem definidos.
+const STAGE1_REQUEST_STATUS = 'teste';
+const STAGE1_DEAL_STATUS    = 'teste';
+const STAGE2_REQUEST_STATUS = 'teste2';
+const STAGE2_DEAL_STATUS    = 'teste2';
+
 
 const HEADER_DEFAULTS = {
     CODTIPOPER:  1001, // Pedido de venda
@@ -34,9 +41,12 @@ const HEADER_DEFAULTS = {
 const ITEM_DEFAULTS = {
     QTDNEG:       1,
     CODVOL:       'UN',
-    CODLOCALORIG: 101,
+    CODLOCALORIG: 111,
     CODTRIB:      40,
     CSTIPI:       99,
+    SEQUENCIA:    '',
+    PERCDESC:     0,
+    VLRDESC:      0,
 } as const;
 
 const OPERACAO_DEFAULT = {
@@ -45,11 +55,26 @@ const OPERACAO_DEFAULT = {
 } as const;
 
 export function matchesPadrao(order: Order): boolean {
-    return (
-        order.requestStatus === 'teste' && // a definir status
-        order.dealStatus    === 'teste' &&
-        order.kind          === 'Kit Personalizado'
-    );
+    const stage1 =
+        order.requestStatus === STAGE1_REQUEST_STATUS &&
+        order.dealStatus    === STAGE1_DEAL_STATUS;
+    const stage2 =
+        order.requestStatus === STAGE2_REQUEST_STATUS &&
+        order.dealStatus    === STAGE2_DEAL_STATUS;
+    return (stage1 || stage2) && order.kind === 'Kit Personalizado';
+}
+
+/**
+ * Sinaliza que o flow completou o estágio 1 (até STEP 11) e está aguardando
+ * o pedido evoluir pra teste2 + products prontos. Não é um erro real — é controle
+ * de fluxo. O processor / resumer captura e marca a integração como
+ * 'partial_complete' em vez de 'failed'.
+ */
+export class PartialCompleteSignal extends Error {
+    constructor(public readonly reason: string) {
+        super(reason);
+        this.name = 'PartialCompleteSignal';
+    }
 }
 
 function companyToSource(order: Order): PartnerSourceData {
@@ -337,6 +362,35 @@ export async function runPadraoFlow(order: Order, integrationId: number): Promis
         message: `Atividade iniciada, IDIATV=${idiatv}`,
         context: { idiproc, idiatv },
     });
+
+    // ─── GATE: estágio A para aqui; estágio B prossegue ────────────────────
+    // No estágio B (resume), os steps 1–11 acima foram pulados pelo StepRunner
+    // e os payloads (nunota, idiproc, idiatv) vieram de integration_log_steps.
+    const isStage2 =
+        order.requestStatus === STAGE2_REQUEST_STATUS &&
+        order.dealStatus    === STAGE2_DEAL_STATUS;
+
+    if (!isStage2) {
+        await log({
+            level: 'info', source: 'flow.padrao', piedCode: order.code,
+            message: 'Estágio 1 concluído — aguardando transição pra teste2',
+            context: {
+                integrationId, nunota, idiproc, idiatv,
+                requestStatus: order.requestStatus,
+                dealStatus:    order.dealStatus,
+            },
+        });
+        throw new PartialCompleteSignal('aguardando teste2');
+    }
+
+    if (!order.products?.length) {
+        await log({
+            level: 'warn', source: 'flow.padrao', piedCode: order.code,
+            message: 'Pedido em teste2 mas sem products — voltando para partial',
+            context: { integrationId, nunota, idiproc, idiatv },
+        });
+        throw new PartialCompleteSignal('products vazios em teste2');
+    }
 
     // ─── STEP 12: movimenta matérias-primas (gera PA em estoque) ───────────
     const materiais = order.products.map(buildMaterial);

@@ -1,16 +1,17 @@
 import { piedClient } from '../class/pied.class';
-import { matchesPadrao, runPadraoFlow } from '../flows/padrao.flow';
+import { matchesPadrao, runPadraoFlow, PartialCompleteSignal } from '../flows/padrao.flow';
 import { Order } from '../types/order.types';
 import {
     findLatestFailedByCode,
     markProcessing,
     markCompleted,
     markFailed,
+    markPartialComplete,
 } from '../db/repos/integrationLog.repo';
 import { log } from '../db/logger';
 import { pool } from '../db/pool';
 import { tryLockPiedCode } from '../db/locks';
-import { notifyFlowCompleted, notifyFlowFailed } from './email/notifier';
+import { notifyFlowCompleted, notifyFlowFailed, notifyFlowStage1 } from './email/notifier';
 
 /**
  * Retoma uma execução que terminou em status='failed'. Usa o MESMO integration_log id
@@ -37,6 +38,7 @@ export type ResumeResult =
     | { status: 'no_order';    message: string }
     | { status: 'locked';      message: string }
     | { status: 'completed';   integrationId: number; nunota: number | null }
+    | { status: 'partial';     integrationId: number; reason: string }
     | { status: 'failed';      integrationId: number; error: string };
 
 export async function resumeOrder(piedCode: string): Promise<ResumeResult> {
@@ -117,6 +119,22 @@ export async function resumeOrder(piedCode: string): Promise<ResumeResult> {
                 nunota: rows[0]?.nunota ?? null,
             };
         } catch (err) {
+            // Resume avançou até o gate do estágio 1 — não é falha.
+            if (err instanceof PartialCompleteSignal) {
+                await markPartialComplete(lastFailed.id, err.message);
+                await log({
+                    level: 'info', source: 'resumer', piedCode,
+                    message: `Resume avançou até estágio 1 — aguardando teste2`,
+                    context: { integrationId: lastFailed.id, reason: err.message },
+                });
+                notifyFlowStage1(lastFailed.id, piedCode).catch(() => {});
+                return {
+                    status: 'partial',
+                    integrationId: lastFailed.id,
+                    reason: err.message,
+                };
+            }
+
             const errorMessage = err instanceof Error
                 ? `${err.message}\n${err.stack ?? ''}`
                 : String(err);

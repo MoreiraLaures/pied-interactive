@@ -1,6 +1,6 @@
 import { pool } from '../pool';
 
-export type IntegrationStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type IntegrationStatus = 'pending' | 'processing' | 'partial_complete' | 'completed' | 'failed';
 
 export type IntegrationLogRow = {
     id:            number;
@@ -73,6 +73,25 @@ export async function markFailed(id: number, errorMessage: string): Promise<void
     );
 }
 
+/**
+ * Marca conclusão parcial — estágio 1 do flow (até STEP 11) terminou, falta o
+ * estágio 2. Reusa as mesmas colunas de timing/error de markFailed, mas o status
+ * 'partial_complete' indica que NÃO é falha — é uma pausa controlada aguardando
+ * a próxima transição de status no Pied.
+ */
+export async function markPartialComplete(id: number, reason: string): Promise<void> {
+    await pool.query(
+        `UPDATE integration_log
+            SET status        = 'partial_complete',
+                finished_at   = NOW(),
+                duration_ms   = (EXTRACT(EPOCH FROM (NOW() - COALESCE(started_at, created_at))) * 1000)::INTEGER,
+                error_message = $2,
+                updated_at    = NOW()
+          WHERE id = $1`,
+        [id, reason.slice(0, 4000)]
+    );
+}
+
 /** Histórico de execuções de um pedido. */
 export async function findByCode(piedCode: string, limit = 20): Promise<IntegrationLogRow[]> {
     const { rows } = await pool.query<IntegrationLogRow>(
@@ -90,6 +109,22 @@ export async function findLatestFailedByCode(piedCode: string): Promise<Integrat
     const { rows } = await pool.query<IntegrationLogRow>(
         `SELECT * FROM integration_log
           WHERE pied_code = $1 AND status = 'failed'
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [piedCode]
+    );
+    return rows[0] ?? null;
+}
+
+/**
+ * Última execução com status='partial_complete' — usado pelo processor pra
+ * reusar o mesmo integration_id quando o webhook do estágio 2 chega. Permite
+ * que o StepRunner pule os steps 1–11 (já completed) e siga do STEP 12.
+ */
+export async function findLatestPartialByCode(piedCode: string): Promise<IntegrationLogRow | null> {
+    const { rows } = await pool.query<IntegrationLogRow>(
+        `SELECT * FROM integration_log
+          WHERE pied_code = $1 AND status = 'partial_complete'
           ORDER BY created_at DESC
           LIMIT 1`,
         [piedCode]

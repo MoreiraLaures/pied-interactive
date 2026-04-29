@@ -47,6 +47,46 @@ export function renderSuccessEmail(args: {
     return { subject, bodyHtml };
 }
 
+export function renderStage1Email(args: {
+    log:      IntegrationLogRow;
+    steps:    IntegrationStepRow[];
+    piedCode: string;
+}): { subject: string; bodyHtml: string } {
+    const { log, steps, piedCode } = args;
+
+    const findPayload = (name: string): any => {
+        const s = steps.find(s => s.step_name === name && s.status === 'completed');
+        return s?.payload as any;
+    };
+
+    const nunota  = findPayload('create_order_header')?.nunota  ?? '?';
+    const nulop   = findPayload('start_production')?.nulop      ?? '?';
+    const idiproc = findPayload('confirm_production')?.ordens?.[0] ?? '?';
+    const idiatv  = findPayload('list_activities')?.idiatv      ?? '?';
+
+    const subject = `[Sankhya Tool] Pedido ${piedCode} — estágio 1 concluído (NUNOTA ${nunota})`;
+
+    const bodyHtml = `<!DOCTYPE html><html><head><style>${STYLE}</style></head><body>
+<h2 class="ok">Estágio 1 concluído — aguardando teste2</h2>
+<p>O pedido foi parcialmente integrado. NUNOTA gerada, OP confirmada e atividade iniciada no Sankhya.</p>
+<p>A integração continuará automaticamente assim que o pedido evoluir para <strong>teste2</strong> no Pied (com os products finais definidos).</p>
+<table>
+  <tr><td class="label">Pied code</td><td>${escapeHtml(piedCode)}</td></tr>
+  <tr><td class="label">NUNOTA (Sankhya)</td><td><strong>${escapeHtml(nunota)}</strong></td></tr>
+  <tr><td class="label">NULOP</td><td>${escapeHtml(nulop)}</td></tr>
+  <tr><td class="label">IDIPROC</td><td>${escapeHtml(idiproc)}</td></tr>
+  <tr><td class="label">IDIATV</td><td>${escapeHtml(idiatv)}</td></tr>
+  <tr><td class="label">Flow</td><td>${escapeHtml(log.flow_name)}</td></tr>
+  <tr><td class="label">Iniciado em</td><td>${escapeHtml(log.started_at)}</td></tr>
+  <tr><td class="label">Pausado em</td><td>${escapeHtml(log.finished_at)}</td></tr>
+  <tr><td class="label">Integration log id</td><td>${escapeHtml(log.id)}</td></tr>
+</table>
+<p class="muted">Sankhya Tool · pied-interactive</p>
+</body></html>`;
+
+    return { subject, bodyHtml };
+}
+
 export function renderFailureEmail(args: {
     log:        IntegrationLogRow;
     failedStep: IntegrationStepRow | null;

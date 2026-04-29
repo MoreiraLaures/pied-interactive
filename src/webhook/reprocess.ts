@@ -38,6 +38,7 @@ router.post('/reprocess/:code/resume', async (req: Request, res: Response) => {
 
         const httpStatus =
             result.status === 'completed'  ? 200 :
+            result.status === 'partial'    ? 200 :
             result.status === 'no_failure' ? 404 :
             result.status === 'no_flow'    ? 404 :
             result.status === 'no_order'   ? 404 :

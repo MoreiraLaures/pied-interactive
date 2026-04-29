@@ -8,9 +8,9 @@
  */
 
 import { findById } from '../../db/repos/integrationLog.repo';
-import { findFailedStep } from '../../db/repos/integrationStep.repo';
+import { findFailedStep, findAllByIntegration } from '../../db/repos/integrationStep.repo';
 import { sendMail, getRecipients } from './mailer';
-import { renderSuccessEmail, renderFailureEmail } from './templates';
+import { renderSuccessEmail, renderFailureEmail, renderStage1Email } from './templates';
 import { log } from '../../db/logger';
 import { pool } from '../../db/pool';
 
@@ -44,6 +44,38 @@ export async function notifyFlowCompleted(integrationId: number, piedCode: strin
         await log({
             level: 'error', source: 'notifier', piedCode,
             message: 'Falha ao enviar email de sucesso',
+            context: { integrationId, error: msg },
+        }).catch(() => {});
+        console.error('[notifier]', msg);
+    }
+}
+
+export async function notifyFlowStage1(integrationId: number, piedCode: string): Promise<void> {
+    try {
+        const recipients = getRecipients();
+        if (recipients.length === 0) {
+            console.warn('[notifier] MAIL_RECIPIENTS vazio — pulando notificação de estágio 1');
+            return;
+        }
+
+        const logRow = await findById(integrationId);
+        if (!logRow) return;
+
+        const steps = await findAllByIntegration(integrationId);
+
+        const { subject, bodyHtml } = renderStage1Email({ log: logRow, steps, piedCode });
+        await sendMail({ to: recipients, subject, bodyHtml });
+
+        await log({
+            level: 'info', source: 'notifier', piedCode,
+            message: 'Email de estágio 1 enviado',
+            context: { integrationId, recipients },
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await log({
+            level: 'error', source: 'notifier', piedCode,
+            message: 'Falha ao enviar email de estágio 1',
             context: { integrationId, error: msg },
         }).catch(() => {});
         console.error('[notifier]', msg);
